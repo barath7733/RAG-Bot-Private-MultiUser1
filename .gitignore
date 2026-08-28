@@ -1,0 +1,35 @@
+# Environment / secrets
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Data (uploaded documents & local registry — do not commit user data)
+data/pdfs/*
+!data/pdfs/.gitkeep
+data/documents/*
+!data/documents/.gitkeep
+
+# Database (contains user accounts, documents metadata, chat history)
+data/*.db
+data/*.db-journal
+*.db
+*.sqlite3
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Log in · AI Assistant</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-card">
+      <div class="logo">🧠</div>
+      <h1>Welcome back</h1>
+      <p class="auth-subtitle">Log in to your personal AI assistant</p>
+
+      <div id="auth-error" class="auth-error"></div>
+
+      <form id="login-form" class="auth-form">
+        <div class="form-field">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" autocomplete="email" required />
+        </div>
+        <div class="form-field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required />
+        </div>
+        <button type="submit" id="submit-btn" class="auth-submit-btn">Log in</button>
+      </form>
+
+      <p class="auth-switch">Don't have an account? <a href="/register">Create one</a></p>
+    </div>
+  </div>
+
+  <script src="/static/auth.js"></script>
+  <script>
+    setupAuthForm({
+      formId: "login-form",
+      submitBtnId: "submit-btn",
+      submitLabel: "Log in",
+      loadingLabel: "Logging in...",
+      endpoint: "/api/auth/login",
+      buildPayload: () => ({
+        email: document.getElementById("email").value.trim(),
+        password: document.getElementById("password").value,
+      }),
+    });
+  </script>
+</body>
+</html>
