@@ -6,9 +6,12 @@
 <title>AI Assistant · General + RAG Document Intelligence</title>
 <link rel="stylesheet" href="/static/style.css" />
 </head>
+
 <body>
   <div class="app">
+
     <aside class="sidebar">
+
       <div class="sidebar-header">
         <div class="logo">🧠</div>
         <div>
@@ -18,91 +21,251 @@
       </div>
 
       <div class="user-bar">
-        <span class="user-email" id="user-email" title="{{ user_email }}">{{ user_email }}</span>
-        <button id="logout-btn" class="logout-btn">Log out</button>
+        <span
+          class="user-email"
+          id="user-email"
+          title="{{ user_email }}"
+        >
+          {{ user_email }}
+        </span>
+
+        <button
+          id="logout-btn"
+          class="logout-btn"
+        >
+          Log out
+        </button>
       </div>
 
       <div class="history-section">
         <label class="section-label">Chats</label>
-        <button id="new-chat-btn" class="secondary-btn new-chat-btn">+ New Chat</button>
-        <div id="history-list" class="history-list">
-          <p class="empty-hint">No chats yet.</p>
+
+        <button
+          id="new-chat-btn"
+          class="secondary-btn new-chat-btn"
+        >
+          + New Chat
+        </button>
+
+        <div
+          id="history-list"
+          class="history-list"
+        >
+          <p class="empty-hint">
+            No chats yet.
+          </p>
         </div>
       </div>
 
       <div class="mode-selector">
         <label class="section-label">Mode</label>
-        <div class="mode-toggle" id="mode-toggle">
-          <button class="mode-btn active" data-mode="auto">Auto</button>
-          <button class="mode-btn" data-mode="general">General AI</button>
-          <button class="mode-btn" data-mode="rag">Document</button>
-          <button class="mode-btn" data-mode="web">Web Search</button>
+
+        <div
+          class="mode-toggle"
+          id="mode-toggle"
+        >
+          <button
+            class="mode-btn active"
+            data-mode="auto"
+          >
+            Auto
+          </button>
+
+          <button
+            class="mode-btn"
+            data-mode="general"
+          >
+            General AI
+          </button>
+
+          <button
+            class="mode-btn"
+            data-mode="rag"
+          >
+            Document
+          </button>
+
+          <button
+            class="mode-btn"
+            data-mode="web"
+          >
+            Web Search
+          </button>
         </div>
       </div>
 
-      <div class="image-gen-section">
-        <label class="section-label">Generate Image</label>
-        <form id="image-form" class="image-form">
-          <textarea id="image-prompt" placeholder="Describe an image..." rows="2" maxlength="2000"></textarea>
-          <button type="submit" id="image-generate-btn" class="secondary-btn full-width">🎨 Generate Image</button>
-        </form>
-      </div>
+      <!-- Image Generation Removed -->
 
       <div class="upload-section">
-        <label class="section-label">Upload Document</label>
-        <label class="upload-btn" for="file-input">
-          <span id="upload-icon">📄</span>
-          <span id="upload-label-text">Choose PDF</span>
+        <label class="section-label">
+          Upload Document
         </label>
-        <input type="file" id="file-input" accept="application/pdf" hidden />
-        <div id="upload-status" class="upload-status"></div>
+
+        <label
+          class="upload-btn"
+          for="file-input"
+        >
+          <span id="upload-icon">📄</span>
+
+          <span id="upload-label-text">
+            Choose PDF
+          </span>
+        </label>
+
+        <input
+          type="file"
+          id="file-input"
+          accept="application/pdf"
+          hidden
+        />
+
+        <div
+          id="upload-status"
+          class="upload-status"
+        ></div>
       </div>
 
       <div class="documents-section">
-        <label class="section-label">Documents</label>
-        <div id="document-list" class="document-list">
-          <p class="empty-hint">No documents uploaded yet.</p>
+        <label class="section-label">
+          Documents
+        </label>
+
+        <div
+          id="document-list"
+          class="document-list"
+        >
+          <p class="empty-hint">
+            No documents uploaded yet.
+          </p>
         </div>
       </div>
 
       <div class="sidebar-footer">
-        <button id="clear-chat-btn" class="secondary-btn">🗑️ Clear Chat</button>
-        <div id="health-indicator" class="health-indicator" title="Checking status...">●</div>
+
+        <button
+          id="clear-chat-btn"
+          class="secondary-btn"
+        >
+          🗑️ Clear Chat
+        </button>
+
+        <div
+          id="health-indicator"
+          class="health-indicator"
+          title="Checking status..."
+        >
+          ●
+        </div>
+
       </div>
+
     </aside>
 
     <main class="chat-area">
-      <div id="chat-window" class="chat-window">
+
+      <div
+        id="chat-window"
+        class="chat-window"
+      >
+
         <div class="welcome-message">
-          <h2>How can I help you today?</h2>
-          <p>Ask me anything, or upload a PDF and ask questions about it.</p>
+
+          <h2>
+            How can I help you today?
+          </h2>
+
+          <p>
+            Ask me anything, or upload a PDF
+            and ask questions about it.
+          </p>
+
         </div>
+
       </div>
 
-      <div id="loading-indicator" class="loading-indicator hidden">
-        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <div
+        id="loading-indicator"
+        class="loading-indicator hidden"
+      >
+        <span class="dot"></span>
+        <span class="dot"></span>
+        <span class="dot"></span>
       </div>
 
-      <div id="image-attach-preview" class="image-attach-preview hidden">
-        <img id="image-attach-thumb" src="" alt="Attached image" />
-        <span id="image-attach-name" class="image-attach-name"></span>
-        <button type="button" id="image-attach-remove" class="image-attach-remove" aria-label="Remove image">✕</button>
+      <!-- Image attachment / Vision feature is kept -->
+
+      <div
+        id="image-attach-preview"
+        class="image-attach-preview hidden"
+      >
+
+        <img
+          id="image-attach-thumb"
+          src=""
+          alt="Attached image"
+        />
+
+        <span
+          id="image-attach-name"
+          class="image-attach-name"
+        ></span>
+
+        <button
+          type="button"
+          id="image-attach-remove"
+          class="image-attach-remove"
+          aria-label="Remove image"
+        >
+          ✕
+        </button>
+
       </div>
 
-      <form id="chat-form" class="chat-input-area">
-        <input type="file" id="vision-file-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
-        <button type="button" id="attach-image-btn" class="attach-btn" title="Attach an image to ask about" aria-label="Attach image">📎</button>
+      <form
+        id="chat-form"
+        class="chat-input-area"
+      >
+
+        <input
+          type="file"
+          id="vision-file-input"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          hidden
+        />
+
+        <button
+          type="button"
+          id="attach-image-btn"
+          class="attach-btn"
+          title="Attach an image to ask about"
+          aria-label="Attach image"
+        >
+          📎
+        </button>
+
         <textarea
           id="chat-input"
           placeholder="Ask a question, or attach an image to ask about it..."
           rows="1"
           maxlength="4000"
         ></textarea>
-        <button type="submit" id="send-btn" class="send-btn" aria-label="Send">➤</button>
+
+        <button
+          type="submit"
+          id="send-btn"
+          class="send-btn"
+          aria-label="Send"
+        >
+          ➤
+        </button>
+
       </form>
+
     </main>
+
   </div>
 
   <script src="/static/script.js"></script>
+
 </body>
 </html>
