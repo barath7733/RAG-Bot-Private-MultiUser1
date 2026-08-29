@@ -1,22 +1,5 @@
 """
-AI image generation.
-
-Uses the free Pollinations.ai image API (https://pollinations.ai),
-which requires no API key — a plain HTTPS request with a URL-encoded
-prompt returns a generated image. This keeps the "get it working
-today" bar low; if you later want higher-quality or commercially
-licensed output, swap this module for a provider like Stability AI
-or Together AI (both take an API key the same way Groq/Pinecone do
-here — see the README for notes).
-
-ACCURACY: raw user prompts are frequently short/vague ("a cat on a
-skateboard"), and diffusion models are very sensitive to how specific
-a prompt is. Before generating, the raw prompt is expanded into a
-detailed, unambiguous prompt via Groq (see
-app.groq_client.enhance_image_prompt) — preserving the user's exact
-subject/intent while adding the visual specificity (composition,
-lighting, style) needed to get an accurate result. This step degrades
-gracefully to the raw prompt if the LLM call fails.
+AI image generation using the current Pollinations API.
 """
 
 from __future__ import annotations
@@ -32,30 +15,42 @@ from app.groq_client import enhance_image_prompt
 
 logger = logging.getLogger("rag_chatbot.image_gen")
 
-POLLINATIONS_BASE_URL = "https://image.pollinations.ai/prompt"
+POLLINATIONS_BASE_URL = "https://gen.pollinations.ai/image"
 
 
 class ImageGenerationError(Exception):
     """Raised for any user-facing image generation failure."""
 
 
-def build_image_url(prompt: str, width: int = 1024, height: int = 1024) -> str:
+def build_image_url(
+    prompt: str,
+    width: int = 1024,
+    height: int = 1024,
+) -> str:
     """
-    Build a direct, shareable image URL for the given (already final)
-    prompt. The frontend can render this URL straight into an <img>
-    tag — the image is generated on Pollinations' side on first fetch.
+    Build a Pollinations image URL using the current API.
     """
+
     if not prompt or not prompt.strip():
-        raise ImageGenerationError("Please provide a description of the image you want to generate.")
+        raise ImageGenerationError(
+            "Please provide a description of the image you want to generate."
+        )
 
     settings = get_settings()
+
     encoded_prompt = urllib.parse.quote(prompt.strip())
-    # A random seed keeps repeated identical prompts from being cached to the same image.
     seed = uuid.uuid4().int % 1_000_000
-    return (
+
+    url = (
         f"{POLLINATIONS_BASE_URL}/{encoded_prompt}"
-        f"?width={width}&height={height}&seed={seed}&nologo=true&model={settings.image_gen_model}"
+        f"?model={settings.image_gen_model}"
+        f"&width={width}"
+        f"&height={height}"
+        f"&seed={seed}"
+        f"&nologo=true"
     )
+
+    return url
 
 
 def generate_image(
@@ -65,36 +60,97 @@ def generate_image(
     enhance: bool = True,
 ) -> tuple[str, str]:
     """
-    Generate an image for the prompt and return (image_url, final_prompt),
-    after verifying the generation actually succeeds (Pollinations
-    returns a real error status for disallowed/invalid prompts rather
-    than a valid image).
+    Generate an image using Pollinations and return:
 
-    `final_prompt` is what was actually sent to the image model — when
-    `enhance=True` (the default) this is the Groq-expanded version of
-    the user's prompt, returned to the caller so the frontend can show
-    the user exactly what was generated from, for transparency.
+        (image_url, final_prompt)
     """
+
     if not prompt or not prompt.strip():
-        raise ImageGenerationError("Please provide a description of the image you want to generate.")
+        raise ImageGenerationError(
+            "Please provide a description of the image you want to generate."
+        )
 
-    final_prompt = enhance_image_prompt(prompt) if enhance else prompt.strip()
+    settings = get_settings()
 
-    url = build_image_url(final_prompt, width=width, height=height)
+    # Enhance the user's prompt using Groq.
+    if enhance:
+        try:
+            final_prompt = enhance_image_prompt(prompt)
+        except Exception as exc:
+            logger.warning(
+                "Image prompt enhancement failed, using original prompt: %s",
+                exc,
+            )
+            final_prompt = prompt.strip()
+    else:
+        final_prompt = prompt.strip()
+
+    url = build_image_url(
+        final_prompt,
+        width=width,
+        height=height,
+    )
+
+    if not settings.pollinations_api_key:
+        logger.error("POLLINATIONS_API_KEY is not configured.")
+
+        raise ImageGenerationError(
+            "Image generation is not configured. "
+            "Please add POLLINATIONS_API_KEY in the server environment."
+        )
+
+    headers = {
+        "Authorization": f"Bearer {settings.pollinations_api_key}",
+    }
 
     try:
-        response = httpx.get(url, timeout=60.0, follow_redirects=True)
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "Image generation failed with status %s (prompt: %r)",
-            exc.response.status_code, final_prompt,
+        response = httpx.get(
+            url,
+            headers=headers,
+            timeout=120.0,
+            follow_redirects=True,
         )
+
+        response.raise_for_status()
+
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code
+
+        logger.error(
+            "Pollinations image generation failed. "
+            "Status=%s Prompt=%r",
+            status_code,
+            final_prompt,
+        )
+
+        if status_code == 401:
+            raise ImageGenerationError(
+                "Image generation authentication failed. "
+                "Please check the Pollinations API key."
+            ) from exc
+
+        if status_code == 402:
+            raise ImageGenerationError(
+                "Image generation requires available Pollen/credits."
+            ) from exc
+
+        if status_code == 429:
+            raise ImageGenerationError(
+                "Image generation rate limit reached. Please try again later."
+            ) from exc
+
         raise ImageGenerationError(
-            "Image generation failed. Try rephrasing your prompt."
+            "Image generation failed. Please try again."
         ) from exc
+
     except httpx.HTTPError as exc:
-        logger.error("Image generation request error: %s", exc)
-        raise ImageGenerationError(f"Image generation request failed: {exc}") from exc
+        logger.error(
+            "Pollinations image generation request error: %s",
+            exc,
+        )
+
+        raise ImageGenerationError(
+            "Unable to connect to the image generation service."
+        ) from exc
 
     return url, final_prompt

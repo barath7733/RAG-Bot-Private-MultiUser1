@@ -54,7 +54,9 @@ class Settings(BaseSettings):
     web_search_max_results: int = Field(default=5, alias="WEB_SEARCH_MAX_RESULTS")
 
     # --- Image generation ----------------------------------------------
+    # --- Image generation ----------------------------------------------
     image_gen_model: str = Field(default="flux", alias="IMAGE_GEN_MODEL")
+    pollinations_api_key: str = Field(default="", alias="POLLINATIONS_API_KEY")
 
     # --- Embeddings provider (Gemini) -----------------------------------
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
