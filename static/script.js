@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------
 // Frontend logic for the AI Assistant + RAG Document Intelligence app.
-// No API keys or secrets ever live in this file — every privileged call
-// goes through the FastAPI backend.
+// No API keys or secrets ever live in this file.
+// Every privileged call goes through the backend.
 // ----------------------------------------------------------------------
 
 const API = {
@@ -17,11 +17,11 @@ const API = {
 
 const state = {
   mode: "auto",
-  history: [], // {role, content} — recent context sent with each request
+  history: [],
   documents: [],
-  sessionId: null, // current chat session id (null = not started yet)
+  sessionId: null,
   sessions: [],
-  pendingImage: null, // File object attached but not yet sent
+  pendingImage: null,
 };
 
 const el = {
@@ -47,8 +47,9 @@ const el = {
   imageAttachRemove: document.getElementById("image-attach-remove"),
 };
 
-
-// ---------------------------- Auth guard ----------------------------
+// ----------------------------------------------------------------------
+// Auth guard
+// ----------------------------------------------------------------------
 
 function handleUnauthorized(response) {
   if (response.status === 401) {
@@ -59,67 +60,80 @@ function handleUnauthorized(response) {
   return false;
 }
 
+if (el.logoutBtn) {
+  el.logoutBtn.addEventListener("click", async () => {
+    try {
+      await fetch(API.logout, {
+        method: "POST",
+        credentials: "same-origin",
+      });
+    } finally {
+      window.location.href = "/login";
+    }
+  });
+}
 
-el.logoutBtn.addEventListener("click", async () => {
-  try {
-    await fetch(API.logout, {
-      method: "POST",
-      credentials: "same-origin"
+// ----------------------------------------------------------------------
+// Mode selector
+// ----------------------------------------------------------------------
+
+if (el.modeToggle) {
+  el.modeToggle.addEventListener("click", (e) => {
+    const btn = e.target.closest(".mode-btn");
+
+    if (!btn) return;
+
+    document.querySelectorAll(".mode-btn").forEach((b) => {
+      b.classList.remove("active");
     });
-  } finally {
-    window.location.href = "/login";
-  }
-});
 
+    btn.classList.add("active");
+    state.mode = btn.dataset.mode;
+  });
+}
 
-// ---------------------------- Mode selector ----------------------------
-
-el.modeToggle.addEventListener("click", (e) => {
-  const btn = e.target.closest(".mode-btn");
-
-  if (!btn) return;
-
-  document
-    .querySelectorAll(".mode-btn")
-    .forEach((b) => b.classList.remove("active"));
-
-  btn.classList.add("active");
-
-  state.mode = btn.dataset.mode;
-});
-
-
-// ---------------------------- Chat ----------------------------
+// ----------------------------------------------------------------------
+// Chat input
+// ----------------------------------------------------------------------
 
 function autoResizeTextarea() {
+  if (!el.chatInput) return;
+
   el.chatInput.style.height = "auto";
 
   el.chatInput.style.height =
     Math.min(el.chatInput.scrollHeight, 160) + "px";
 }
 
+if (el.chatInput) {
+  el.chatInput.addEventListener("input", autoResizeTextarea);
 
-el.chatInput.addEventListener(
-  "input",
-  autoResizeTextarea
-);
+  el.chatInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
 
-
-el.chatInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    el.chatForm.requestSubmit();
-  }
-});
-
-
-function clearWelcomeMessage() {
-  const welcome =
-    el.chatWindow.querySelector(".welcome-message");
-
-  if (welcome) welcome.remove();
+      if (el.chatForm) {
+        el.chatForm.requestSubmit();
+      }
+    }
+  });
 }
 
+// ----------------------------------------------------------------------
+// Welcome message
+// ----------------------------------------------------------------------
+
+function clearWelcomeMessage() {
+  const welcome = el.chatWindow?.querySelector(".welcome-message");
+
+  if (welcome) {
+    welcome.remove();
+  }
+}
+
+// ----------------------------------------------------------------------
+// Mode labels
+// ----------------------------------------------------------------------
 
 const MODE_LABELS = {
   rag: "📄 Document Mode",
@@ -128,44 +142,44 @@ const MODE_LABELS = {
   vision: "🖼️ Image Analysis",
 };
 
-
-// ---------------------------- Markdown rendering ----------------------------
+// ----------------------------------------------------------------------
+// Markdown rendering
+// ----------------------------------------------------------------------
 
 function renderMarkdown(text) {
   if (!text) return "";
 
-  let escaped = escapeHtml(text);
-
+  const escaped = escapeHtml(String(text));
   const lines = escaped.split("\n");
+
   const htmlParts = [];
+
   let i = 0;
 
   while (i < lines.length) {
     const line = lines[i];
 
+    // --------------------------------------------------------------
     // Markdown table
+    // --------------------------------------------------------------
+
     if (
       line.trim().startsWith("|") &&
-      lines[i + 1] &&
-      /^\s*\|?[\s:-]+\|[\s:|-]*$/.test(lines[i + 1])
+      i + 1 < lines.length &&
+      isMarkdownTableSeparator(lines[i + 1])
     ) {
-      const headerCells = line
-        .trim()
-        .replace(/^\||\|$/g, "")
-        .split("|")
-        .map((c) => c.trim());
+      const headerCells = parseTableRow(line);
 
       let tableHtml =
-        '<table class="md-table"><thead><tr>';
+        '<div class="table-wrapper">' +
+        '<table class="md-table">' +
+        "<thead><tr>";
 
-      headerCells.forEach(
-        (c) =>
-          (tableHtml +=
-            `<th>${inlineMarkdown(c)}</th>`)
-      );
+      headerCells.forEach((cell) => {
+        tableHtml += `<th>${inlineMarkdown(cell)}</th>`;
+      });
 
-      tableHtml +=
-        "</tr></thead><tbody>";
+      tableHtml += "</tr></thead><tbody>";
 
       i += 2;
 
@@ -173,42 +187,35 @@ function renderMarkdown(text) {
         i < lines.length &&
         lines[i].trim().startsWith("|")
       ) {
-        const rowCells = lines[i]
-          .trim()
-          .replace(/^\||\|$/g, "")
-          .split("|")
-          .map((c) => c.trim());
+        const rowCells = parseTableRow(lines[i]);
 
         tableHtml += "<tr>";
 
-        rowCells.forEach(
-          (c) =>
-            (tableHtml +=
-              `<td>${inlineMarkdown(c)}</td>`)
-        );
+        rowCells.forEach((cell) => {
+          tableHtml += `<td>${inlineMarkdown(cell)}</td>`;
+        });
 
         tableHtml += "</tr>";
 
         i++;
       }
 
-      tableHtml += "</tbody></table>";
+      tableHtml +=
+        "</tbody></table></div>";
 
       htmlParts.push(tableHtml);
 
       continue;
     }
 
-
+    // --------------------------------------------------------------
     // Headings
-    const headingMatch =
-      line.match(/^(#{1,4})\s+(.*)$/);
+    // --------------------------------------------------------------
+
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
 
     if (headingMatch) {
-      const level = Math.min(
-        headingMatch[1].length + 2,
-        6
-      );
+      const level = Math.min(headingMatch[1].length, 6);
 
       htmlParts.push(
         `<h${level} class="md-heading">${inlineMarkdown(
@@ -217,27 +224,26 @@ function renderMarkdown(text) {
       );
 
       i++;
-
       continue;
     }
 
-
+    // --------------------------------------------------------------
     // Bullet list
-    if (/^\s*[-*]\s+/.test(line)) {
-      let listHtml =
-        '<ul class="md-list">';
+    // --------------------------------------------------------------
+
+    if (/^\s*[-*+]\s+/.test(line)) {
+      let listHtml = '<ul class="md-list">';
 
       while (
         i < lines.length &&
-        /^\s*[-*]\s+/.test(lines[i])
+        /^\s*[-*+]\s+/.test(lines[i])
       ) {
-        listHtml +=
-          `<li>${inlineMarkdown(
-            lines[i].replace(
-              /^\s*[-*]\s+/,
-              ""
-            )
-          )}</li>`;
+        const itemText = lines[i].replace(
+          /^\s*[-*+]\s+/,
+          ""
+        );
+
+        listHtml += `<li>${inlineMarkdown(itemText)}</li>`;
 
         i++;
       }
@@ -249,23 +255,23 @@ function renderMarkdown(text) {
       continue;
     }
 
-
+    // --------------------------------------------------------------
     // Numbered list
+    // --------------------------------------------------------------
+
     if (/^\s*\d+[.)]\s+/.test(line)) {
-      let listHtml =
-        '<ol class="md-list">';
+      let listHtml = '<ol class="md-list">';
 
       while (
         i < lines.length &&
         /^\s*\d+[.)]\s+/.test(lines[i])
       ) {
-        listHtml +=
-          `<li>${inlineMarkdown(
-            lines[i].replace(
-              /^\s*\d+[.)]\s+/,
-              ""
-            )
-          )}</li>`;
+        const itemText = lines[i].replace(
+          /^\s*\d+[.)]\s+/,
+          ""
+        );
+
+        listHtml += `<li>${inlineMarkdown(itemText)}</li>`;
 
         i++;
       }
@@ -277,15 +283,60 @@ function renderMarkdown(text) {
       continue;
     }
 
+    // --------------------------------------------------------------
+    // Blockquote
+    // --------------------------------------------------------------
 
+    if (/^\s*>\s?/.test(line)) {
+      let quoteHtml = '<blockquote class="md-quote">';
+
+      while (
+        i < lines.length &&
+        /^\s*>\s?/.test(lines[i])
+      ) {
+        const quoteText = lines[i].replace(
+          /^\s*>\s?/,
+          ""
+        );
+
+        quoteHtml += `<p>${inlineMarkdown(quoteText)}</p>`;
+
+        i++;
+      }
+
+      quoteHtml += "</blockquote>";
+
+      htmlParts.push(quoteHtml);
+
+      continue;
+    }
+
+    // --------------------------------------------------------------
+    // Horizontal rule
+    // --------------------------------------------------------------
+
+    if (
+      /^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)
+    ) {
+      htmlParts.push('<hr class="md-hr">');
+
+      i++;
+      continue;
+    }
+
+    // --------------------------------------------------------------
     // Blank line
+    // --------------------------------------------------------------
+
     if (line.trim() === "") {
       i++;
       continue;
     }
 
-
+    // --------------------------------------------------------------
     // Regular paragraph
+    // --------------------------------------------------------------
+
     htmlParts.push(
       `<p class="md-p">${inlineMarkdown(line)}</p>`
     );
@@ -296,31 +347,95 @@ function renderMarkdown(text) {
   return htmlParts.join("");
 }
 
+// ----------------------------------------------------------------------
+// Markdown helpers
+// ----------------------------------------------------------------------
 
-function inlineMarkdown(text) {
-  return text
-    .replace(
-      /`([^`]+)`/g,
-      "<code>$1</code>"
-    )
-    .replace(
-      /\*\*([^*]+)\*\*/g,
-      "<strong>$1</strong>"
-    )
-    .replace(
-      /(?<!\*)\*([^*\n]+)\*(?!\*)/g,
-      "<em>$1</em>"
-    )
-    .replace(
-      /~~([^~]+)~~/g,
-      "<del>$1</del>"
-    )
-    .replace(
-      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener">$1</a>'
-    );
+function isMarkdownTableSeparator(line) {
+  const cleaned = line.trim();
+
+  if (!cleaned.startsWith("|")) {
+    return false;
+  }
+
+  const cells = parseTableRow(cleaned);
+
+  if (cells.length === 0) {
+    return false;
+  }
+
+  return cells.every((cell) => {
+    return /^:?-{3,}:?$/.test(cell.trim());
+  });
 }
 
+function parseTableRow(line) {
+  let cleaned = line.trim();
+
+  if (cleaned.startsWith("|")) {
+    cleaned = cleaned.substring(1);
+  }
+
+  if (cleaned.endsWith("|")) {
+    cleaned = cleaned.substring(0, cleaned.length - 1);
+  }
+
+  return cleaned
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function inlineMarkdown(text) {
+  let result = text;
+
+  // Inline code
+  result = result.replace(
+    /`([^`]+)`/g,
+    "<code>$1</code>"
+  );
+
+  // Bold
+  result = result.replace(
+    /\*\*([^*]+)\*\*/g,
+    "<strong>$1</strong>"
+  );
+
+  // Bold using __
+  result = result.replace(
+    /__([^_]+)__/g,
+    "<strong>$1</strong>"
+  );
+
+  // Italic
+  result = result.replace(
+    /(^|[^\*])\*([^*\n]+)\*(?!\*)/g,
+    "$1<em>$2</em>"
+  );
+
+  // Italic using _
+  result = result.replace(
+    /(^|[^_])_([^_\n]+)_(?!_)/g,
+    "$1<em>$2</em>"
+  );
+
+  // Strikethrough
+  result = result.replace(
+    /~~([^~]+)~~/g,
+    "<del>$1</del>"
+  );
+
+  // Links
+  result = result.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+  );
+
+  return result;
+}
+
+// ----------------------------------------------------------------------
+// Message rendering
+// ----------------------------------------------------------------------
 
 function appendMessage({
   role,
@@ -328,154 +443,138 @@ function appendMessage({
   modeUsed,
   sources,
   webSources,
-  isError
+  isError,
 }) {
   clearWelcomeMessage();
 
-  const wrapper =
-    document.createElement("div");
+  const wrapper = document.createElement("div");
 
-  wrapper.className =
-    `message ${role}`;
+  wrapper.className = `message ${role}`;
 
+  // --------------------------------------------------------------
+  // Mode tag
+  // --------------------------------------------------------------
 
-  if (
-    role === "assistant" &&
-    modeUsed
-  ) {
-    const tag =
-      document.createElement("div");
+  if (role === "assistant" && modeUsed) {
+    const tag = document.createElement("div");
 
     tag.className = "mode-tag";
 
     tag.textContent =
-      MODE_LABELS[modeUsed] ||
-      "💬 General AI";
+      MODE_LABELS[modeUsed] || "💬 General AI";
 
     wrapper.appendChild(tag);
   }
 
+  // --------------------------------------------------------------
+  // Message bubble
+  // --------------------------------------------------------------
 
-  const bubble =
-    document.createElement("div");
+  const bubble = document.createElement("div");
 
   bubble.className =
-    "bubble" +
-    (isError ? " error-bubble" : "");
+    "bubble" + (isError ? " error-bubble" : "");
 
-
-  if (
-    role === "assistant" &&
-    !isError
-  ) {
-    bubble.innerHTML =
-      renderMarkdown(content);
+  if (role === "assistant" && !isError) {
+    bubble.innerHTML = renderMarkdown(content);
   } else {
-    bubble.textContent = content;
+    bubble.textContent = content || "";
   }
-
 
   wrapper.appendChild(bubble);
 
+  // --------------------------------------------------------------
+  // Document sources
+  // --------------------------------------------------------------
 
-  if (sources && sources.length > 0) {
-    const box =
-      document.createElement("div");
+  if (Array.isArray(sources) && sources.length > 0) {
+    const box = document.createElement("div");
 
     box.className = "sources-box";
 
-    box.innerHTML =
-      "<strong>Sources:</strong>";
+    const title = document.createElement("strong");
 
+    title.textContent = "Sources:";
+
+    box.appendChild(title);
 
     sources.forEach((s) => {
-      const item =
-        document.createElement("div");
+      const item = document.createElement("div");
 
-      item.className =
-        "source-item";
+      item.className = "source-item";
 
-      const pageInfo =
-        s.page
-          ? `, page ${s.page}`
+      const sourceTitle = document.createElement("div");
+
+      sourceTitle.className = "source-title";
+
+      const pageInfo = s.page
+        ? `, page ${s.page}`
+        : "";
+
+      const score =
+        typeof s.score === "number"
+          ? ` · score ${s.score.toFixed(2)}`
           : "";
 
-      item.innerHTML =
-        `<div class="source-title">${escapeHtml(
-          s.document_name
-        )}${pageInfo} · score ${s.score.toFixed(
-          2
-        )}</div><div>${escapeHtml(
-          s.snippet
-        )}</div>`;
+      sourceTitle.textContent =
+        `${s.document_name || "Document"}${pageInfo}${score}`;
 
-      box.appendChild(item);
-    });
+      const snippet = document.createElement("div");
 
+      snippet.textContent = s.snippet || "";
 
-    wrapper.appendChild(box);
-  }
-
-
-  if (
-    webSources &&
-    webSources.length > 0
-  ) {
-    const box =
-      document.createElement("div");
-
-    box.className =
-      "sources-box";
-
-    box.innerHTML =
-      "<strong>Sources:</strong>";
-
-
-    webSources.forEach((s) => {
-      const item =
-        document.createElement("div");
-
-      item.className =
-        "source-item";
-
-
-      const link =
-        document.createElement("a");
-
-      link.href = s.url;
-
-      link.target = "_blank";
-
-      link.rel =
-        "noopener noreferrer";
-
-      link.className =
-        "source-title";
-
-      link.textContent =
-        s.title;
-
-      link.style.color =
-        "inherit";
-
-      item.appendChild(link);
-
-
-      const snippet =
-        document.createElement("div");
-
-      snippet.textContent =
-        s.snippet;
-
+      item.appendChild(sourceTitle);
       item.appendChild(snippet);
 
       box.appendChild(item);
     });
 
-
     wrapper.appendChild(box);
   }
 
+  // --------------------------------------------------------------
+  // Web sources
+  // --------------------------------------------------------------
+
+  if (
+    Array.isArray(webSources) &&
+    webSources.length > 0
+  ) {
+    const box = document.createElement("div");
+
+    box.className = "sources-box";
+
+    const title = document.createElement("strong");
+
+    title.textContent = "Sources:";
+
+    box.appendChild(title);
+
+    webSources.forEach((s) => {
+      const item = document.createElement("div");
+
+      item.className = "source-item";
+
+      const link = document.createElement("a");
+
+      link.href = s.url || "#";
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.className = "source-title";
+      link.textContent = s.title || s.url || "Web source";
+
+      const snippet = document.createElement("div");
+
+      snippet.textContent = s.snippet || "";
+
+      item.appendChild(link);
+      item.appendChild(snippet);
+
+      box.appendChild(item);
+    });
+
+    wrapper.appendChild(box);
+  }
 
   el.chatWindow.appendChild(wrapper);
 
@@ -483,157 +582,166 @@ function appendMessage({
     el.chatWindow.scrollHeight;
 }
 
+// ----------------------------------------------------------------------
+// HTML escaping
+// ----------------------------------------------------------------------
 
 function escapeHtml(str) {
-  const div =
-    document.createElement("div");
+  const div = document.createElement("div");
 
-  div.textContent = str;
+  div.textContent = String(str ?? "");
 
   return div.innerHTML;
 }
 
+// ----------------------------------------------------------------------
+// Loading
+// ----------------------------------------------------------------------
 
 function setLoading(isLoading) {
-  el.loadingIndicator.classList.toggle(
-    "hidden",
-    !isLoading
-  );
+  if (el.loadingIndicator) {
+    el.loadingIndicator.classList.toggle(
+      "hidden",
+      !isLoading
+    );
+  }
 
-  el.sendBtn.disabled =
-    isLoading;
+  if (el.sendBtn) {
+    el.sendBtn.disabled = isLoading;
+  }
 
-  if (isLoading) {
+  if (isLoading && el.chatWindow) {
     el.chatWindow.scrollTop =
       el.chatWindow.scrollHeight;
   }
 }
 
+// ----------------------------------------------------------------------
+// Image attachment / Vision
+// ----------------------------------------------------------------------
 
-// ---------------------------- Image attach (vision) ----------------------------
-
-el.attachImageBtn.addEventListener(
-  "click",
-  () =>
-    el.visionFileInput.click()
-);
-
-
-el.visionFileInput.addEventListener(
-  "change",
-  () => {
-    const file =
-      el.visionFileInput.files[0];
-
-    if (!file) return;
-
-
-    const allowed = [
-      "image/png",
-      "image/jpeg",
-      "image/webp",
-      "image/gif"
-    ];
-
-
-    if (!allowed.includes(file.type)) {
-      alert(
-        "Only PNG, JPEG, WEBP, or GIF images are supported."
-      );
-
-      el.visionFileInput.value = "";
-
-      return;
+if (el.attachImageBtn && el.visionFileInput) {
+  el.attachImageBtn.addEventListener(
+    "click",
+    () => {
+      el.visionFileInput.click();
     }
-
-
-    if (
-      file.size >
-      10 * 1024 * 1024
-    ) {
-      alert(
-        "Image exceeds the maximum allowed size of 10 MB."
-      );
-
-      el.visionFileInput.value = "";
-
-      return;
-    }
-
-
-    state.pendingImage = file;
-
-    el.imageAttachThumb.src =
-      URL.createObjectURL(file);
-
-    el.imageAttachName.textContent =
-      file.name;
-
-    el.imageAttachPreview.classList.remove(
-      "hidden"
-    );
-
-    el.chatInput.placeholder =
-      "Ask something about this image (optional)...";
-
-    el.chatInput.focus();
-  }
-);
-
-
-function clearPendingImage() {
-  state.pendingImage = null;
-
-  el.visionFileInput.value = "";
-
-  el.imageAttachPreview.classList.add(
-    "hidden"
   );
 
-  el.imageAttachThumb.src = "";
+  el.visionFileInput.addEventListener(
+    "change",
+    () => {
+      const file =
+        el.visionFileInput.files?.[0];
 
-  el.chatInput.placeholder =
-    "Ask a question, or attach an image to ask about it...";
+      if (!file) return;
+
+      const allowed = [
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/gif",
+      ];
+
+      if (!allowed.includes(file.type)) {
+        alert(
+          "Only PNG, JPEG, WEBP, or GIF images are supported."
+        );
+
+        el.visionFileInput.value = "";
+
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        alert(
+          "Image exceeds the maximum allowed size of 10 MB."
+        );
+
+        el.visionFileInput.value = "";
+
+        return;
+      }
+
+      state.pendingImage = file;
+
+      el.imageAttachThumb.src =
+        URL.createObjectURL(file);
+
+      el.imageAttachName.textContent =
+        file.name;
+
+      el.imageAttachPreview.classList.remove(
+        "hidden"
+      );
+
+      el.chatInput.placeholder =
+        "Ask something about this image (optional)...";
+
+      el.chatInput.focus();
+    }
+  );
 }
 
+function clearPendingImage() {
+  if (state.pendingImage) {
+    state.pendingImage = null;
+  }
 
-el.imageAttachRemove.addEventListener(
-  "click",
-  clearPendingImage
-);
+  if (el.visionFileInput) {
+    el.visionFileInput.value = "";
+  }
 
+  if (el.imageAttachPreview) {
+    el.imageAttachPreview.classList.add(
+      "hidden"
+    );
+  }
+
+  if (el.imageAttachThumb) {
+    el.imageAttachThumb.src = "";
+  }
+
+  if (el.chatInput) {
+    el.chatInput.placeholder =
+      "Ask a question, or attach an image to ask about it...";
+  }
+}
+
+if (el.imageAttachRemove) {
+  el.imageAttachRemove.addEventListener(
+    "click",
+    clearPendingImage
+  );
+}
 
 async function submitImageAnalysis() {
-  const file =
-    state.pendingImage;
+  const file = state.pendingImage;
+
+  if (!file) return;
 
   const question =
     el.chatInput.value.trim();
 
-
   clearWelcomeMessage();
-
 
   appendMessage({
     role: "user",
     content:
       question ||
-      "🖼️ (image attached)"
+      "🖼️ (image attached)",
   });
-
 
   state.history.push({
     role: "user",
     content:
       question ||
-      "[Attached an image]"
+      "[Attached an image]",
   });
-
 
   el.chatInput.value = "";
 
   autoResizeTextarea();
-
 
   const thumbUrl =
     URL.createObjectURL(file);
@@ -642,20 +750,10 @@ async function submitImageAnalysis() {
 
   setLoading(true);
 
+  const formData = new FormData();
 
-  const formData =
-    new FormData();
-
-  formData.append(
-    "file",
-    file
-  );
-
-  formData.append(
-    "question",
-    question
-  );
-
+  formData.append("file", file);
+  formData.append("question", question);
 
   if (state.sessionId) {
     formData.append(
@@ -664,277 +762,245 @@ async function submitImageAnalysis() {
     );
   }
 
-
   try {
-    const response =
-      await fetch(
-        API.visionAnalyze,
-        {
-          method: "POST",
-          body: formData,
-          credentials:
-            "same-origin"
-        }
-      );
+    const response = await fetch(
+      API.visionAnalyze,
+      {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin",
+      }
+    );
 
-
-    if (
-      handleUnauthorized(response)
-    ) {
+    if (handleUnauthorized(response)) {
       return;
     }
 
-
-    const data =
-      await response.json();
-
+    const data = await safeJson(response);
 
     if (!response.ok) {
       throw new Error(
         data.error ||
-        data.detail ||
-        "Image analysis failed."
+          data.detail ||
+          "Image analysis failed."
       );
     }
-
 
     state.sessionId =
       data.session_id;
 
-
     appendMessage({
       role: "assistant",
       content: data.answer,
-      modeUsed: "vision"
+      modeUsed: "vision",
     });
-
 
     state.history.push({
       role: "assistant",
-      content: data.answer
+      content: data.answer,
     });
 
-
-    loadChatHistory();
-
-
+    await loadChatHistory();
   } catch (err) {
-
     appendMessage({
       role: "assistant",
       content:
         `Something went wrong: ${err.message}`,
-      isError: true
+      isError: true,
     });
-
   } finally {
-
     setLoading(false);
 
-    URL.revokeObjectURL(
-      thumbUrl
-    );
+    URL.revokeObjectURL(thumbUrl);
   }
 }
 
+// ----------------------------------------------------------------------
+// Chat submit
+// ----------------------------------------------------------------------
 
-el.chatForm.addEventListener(
-  "submit",
-  async (e) => {
+if (el.chatForm) {
+  el.chatForm.addEventListener(
+    "submit",
+    async (e) => {
+      e.preventDefault();
 
-    e.preventDefault();
+      if (state.pendingImage) {
+        await submitImageAnalysis();
+        return;
+      }
 
+      const question =
+        el.chatInput.value.trim();
 
-    if (state.pendingImage) {
-      await submitImageAnalysis();
-      return;
-    }
+      if (!question) return;
 
+      appendMessage({
+        role: "user",
+        content: question,
+      });
 
-    const question =
-      el.chatInput.value.trim();
+      state.history.push({
+        role: "user",
+        content: question,
+      });
 
-    if (!question) return;
+      el.chatInput.value = "";
 
+      autoResizeTextarea();
 
-    appendMessage({
-      role: "user",
-      content: question
-    });
+      setLoading(true);
 
-
-    state.history.push({
-      role: "user",
-      content: question
-    });
-
-
-    el.chatInput.value = "";
-
-    autoResizeTextarea();
-
-    setLoading(true);
-
-
-    try {
-
-      const response =
-        await fetch(
+      try {
+        const response = await fetch(
           API.chat,
           {
             method: "POST",
             headers: {
               "Content-Type":
-                "application/json"
+                "application/json",
             },
             credentials:
               "same-origin",
-
             body: JSON.stringify({
               question,
               mode: state.mode,
-
               history:
                 state.history
                   .slice(0, -1)
                   .slice(-10),
-
               session_id:
-                state.sessionId
-            })
+                state.sessionId,
+            }),
           }
         );
 
+        if (handleUnauthorized(response)) {
+          return;
+        }
 
-      if (
-        handleUnauthorized(response)
-      ) {
-        return;
+        const data =
+          await safeJson(response);
+
+        if (!response.ok) {
+          throw new Error(
+            data.error ||
+              data.detail ||
+              "The request failed."
+          );
+        }
+
+        state.sessionId =
+          data.session_id;
+
+        appendMessage({
+          role: "assistant",
+          content: data.answer,
+          modeUsed: data.mode_used,
+          sources: data.sources,
+          webSources:
+            data.web_sources,
+        });
+
+        state.history.push({
+          role: "assistant",
+          content: data.answer,
+        });
+
+        await loadChatHistory();
+      } catch (err) {
+        appendMessage({
+          role: "assistant",
+          content:
+            `Something went wrong: ${err.message}`,
+          isError: true,
+        });
+      } finally {
+        setLoading(false);
       }
-
-
-      const data =
-        await response.json();
-
-
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-          data.detail ||
-          "The request failed."
-        );
-      }
-
-
-      state.sessionId =
-        data.session_id;
-
-
-      appendMessage({
-        role: "assistant",
-        content: data.answer,
-        modeUsed: data.mode_used,
-        sources: data.sources,
-        webSources:
-          data.web_sources
-      });
-
-
-      state.history.push({
-        role: "assistant",
-        content: data.answer
-      });
-
-
-      loadChatHistory();
-
-
-    } catch (err) {
-
-      appendMessage({
-        role: "assistant",
-        content:
-          `Something went wrong: ${err.message}`,
-        isError: true
-      });
-
-    } finally {
-
-      setLoading(false);
     }
+  );
+}
+
+// ----------------------------------------------------------------------
+// Safe JSON response
+// ----------------------------------------------------------------------
+
+async function safeJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return {
+      error:
+        "The server returned an invalid response.",
+    };
   }
-);
+}
 
-
-// ---------------------------- New Chat ----------------------------
+// ----------------------------------------------------------------------
+// New Chat
+// ----------------------------------------------------------------------
 
 function startNewChat() {
-
   state.history = [];
-
   state.sessionId = null;
-
 
   el.chatWindow.innerHTML = `
     <div class="welcome-message">
       <h2>How can I help you today?</h2>
-      <p>Ask me anything, or upload a PDF and ask questions about it.</p>
+      <p>
+        Ask me anything, or upload a PDF and ask questions about it.
+      </p>
     </div>
   `;
-
 
   renderHistoryList();
 }
 
+if (el.clearChatBtn) {
+  el.clearChatBtn.addEventListener(
+    "click",
+    startNewChat
+  );
+}
 
-el.clearChatBtn.addEventListener(
-  "click",
-  startNewChat
-);
+if (el.newChatBtn) {
+  el.newChatBtn.addEventListener(
+    "click",
+    startNewChat
+  );
+}
 
-
-el.newChatBtn.addEventListener(
-  "click",
-  startNewChat
-);
-
-
-// ---------------------------- Chat history ----------------------------
+// ----------------------------------------------------------------------
+// Chat history
+// ----------------------------------------------------------------------
 
 async function loadChatHistory() {
-
   try {
-
     const response =
       await fetch(
         API.chatHistory,
         {
           credentials:
-            "same-origin"
+            "same-origin",
         }
       );
 
-
-    if (
-      handleUnauthorized(response)
-    ) {
+    if (handleUnauthorized(response)) {
       return;
     }
 
-
     const sessions =
-      await response.json();
+      await safeJson(response);
 
-
-    state.sessions =
-      sessions;
-
+    if (!Array.isArray(sessions)) {
+      state.sessions = [];
+    } else {
+      state.sessions = sessions;
+    }
 
     renderHistoryList();
-
-
   } catch (err) {
-
     console.error(
       "Failed to load chat history",
       err
@@ -942,31 +1008,23 @@ async function loadChatHistory() {
   }
 }
 
-
 function renderHistoryList() {
-
   if (
+    !state.sessions ||
     state.sessions.length === 0
   ) {
-
     el.historyList.innerHTML =
       `<p class="empty-hint">No chats yet.</p>`;
 
     return;
   }
 
-
   el.historyList.innerHTML = "";
-
 
   state.sessions.forEach(
     (session) => {
-
       const item =
-        document.createElement(
-          "div"
-        );
-
+        document.createElement("div");
 
       item.className =
         "history-item" +
@@ -977,88 +1035,78 @@ function renderHistoryList() {
             : ""
         );
 
+      const title =
+        document.createElement("span");
 
-      item.innerHTML = `
-        <span
-          class="history-title"
-          title="${escapeHtml(
-            session.title
-          )}"
-        >
-          ${escapeHtml(
-            session.title
-          )}
-        </span>
+      title.className =
+        "history-title";
 
-        <button
-          class="delete-btn"
-          data-id="${session.session_id}"
-          title="Delete chat"
-        >
-          🗑️
-        </button>
-      `;
+      title.title =
+        session.title || "Chat";
 
+      title.textContent =
+        session.title || "Chat";
 
-      item
-        .querySelector(
-          ".history-title"
-        )
-        .addEventListener(
-          "click",
-          () =>
-            openChatSession(
-              session.session_id
-            )
-        );
+      const deleteButton =
+        document.createElement("button");
 
+      deleteButton.className =
+        "delete-btn";
 
-      item
-        .querySelector(
-          ".delete-btn"
-        )
-        .addEventListener(
-          "click",
-          (e) => {
-            e.stopPropagation();
+      deleteButton.dataset.id =
+        session.session_id;
 
-            deleteChatSession(
-              session.session_id
-            );
-          }
-        );
+      deleteButton.title =
+        "Delete chat";
 
+      deleteButton.textContent =
+        "🗑️";
 
-      el.historyList.appendChild(
-        item
+      item.appendChild(title);
+      item.appendChild(deleteButton);
+
+      title.addEventListener(
+        "click",
+        () =>
+          openChatSession(
+            session.session_id
+          )
       );
+
+      deleteButton.addEventListener(
+        "click",
+        (e) => {
+          e.stopPropagation();
+
+          deleteChatSession(
+            session.session_id
+          );
+        }
+      );
+
+      el.historyList.appendChild(item);
     }
   );
 }
 
-
 async function openChatSession(
   sessionId
 ) {
-
   try {
-
     const response =
       await fetch(
-        `${API.chatHistory}/${sessionId}`,
+        `${API.chatHistory}/${encodeURIComponent(
+          sessionId
+        )}`,
         {
           credentials:
-            "same-origin"
+            "same-origin",
         }
       );
 
-
-    if (
-      handleUnauthorized(response)
-    ) {
+    if (handleUnauthorized(response)) {
       return;
     }
-
 
     if (!response.ok) {
       throw new Error(
@@ -1066,83 +1114,75 @@ async function openChatSession(
       );
     }
 
-
     const detail =
-      await response.json();
-
+      await safeJson(response);
 
     state.sessionId =
       detail.session_id;
 
-
     state.history =
-      detail.messages.map(
-        (m) => ({
-          role: m.role,
-          content: m.content
-        })
-      );
-
+      Array.isArray(detail.messages)
+        ? detail.messages.map(
+            (m) => ({
+              role: m.role,
+              content: m.content,
+            })
+          )
+        : [];
 
     clearWelcomeMessage();
 
     el.chatWindow.innerHTML = "";
 
-
-    detail.messages.forEach(
-      (m) => {
-
-        appendMessage({
-          role: m.role,
-          content: m.content,
-          modeUsed:
-            m.mode_used
-        });
-
-      }
-    );
-
+    if (Array.isArray(detail.messages)) {
+      detail.messages.forEach(
+        (m) => {
+          appendMessage({
+            role: m.role,
+            content: m.content,
+            modeUsed:
+              m.mode_used,
+          });
+        }
+      );
+    }
 
     renderHistoryList();
-
-
   } catch (err) {
-
     console.error(err);
   }
 }
 
-
 async function deleteChatSession(
   sessionId
 ) {
-
   try {
-
     const response =
       await fetch(
-        `${API.chatHistory}/${sessionId}`,
+        `${API.chatHistory}/${encodeURIComponent(
+          sessionId
+        )}`,
         {
           method: "DELETE",
           credentials:
-            "same-origin"
+            "same-origin",
         }
       );
 
-
-    if (
-      handleUnauthorized(response)
-    ) {
+    if (handleUnauthorized(response)) {
       return;
     }
 
-
     if (!response.ok) {
+      const data =
+        await safeJson(response);
+
       throw new Error(
-        "Could not delete that chat."
+        data.error ||
+          data.detail ||
+          "Could not delete that chat."
       );
     }
-
 
     if (
       state.sessionId ===
@@ -1151,141 +1191,172 @@ async function deleteChatSession(
       startNewChat();
     }
 
-
     await loadChatHistory();
-
-
   } catch (err) {
-
     console.error(err);
+
+    alert(
+      `Could not delete chat: ${err.message}`
+    );
   }
 }
 
+// ----------------------------------------------------------------------
+// PDF Document Upload
+// ----------------------------------------------------------------------
 
-// ---------------------------- Document upload ----------------------------
+if (el.fileInput) {
+  el.fileInput.addEventListener(
+    "change",
+    async () => {
+      const file =
+        el.fileInput.files?.[0];
 
-el.fileInput.addEventListener(
-  "change",
-  async () => {
+      if (!file) return;
 
-    const file =
-      el.fileInput.files[0];
+      // ------------------------------------------------------------
+      // Client-side PDF validation
+      // ------------------------------------------------------------
 
-    if (!file) return;
+      const fileName =
+        file.name.toLowerCase();
 
+      const isPdf =
+        file.type === "application/pdf" ||
+        fileName.endsWith(".pdf");
 
-    el.uploadStatus.textContent =
-      `Uploading "${file.name}"...`;
+      if (!isPdf) {
+        el.uploadStatus.textContent =
+          "✗ Please select a PDF file.";
 
-    el.uploadStatus.className =
-      "upload-status";
+        el.uploadStatus.className =
+          "upload-status error";
 
+        el.fileInput.value = "";
 
-    const formData =
-      new FormData();
-
-    formData.append(
-      "file",
-      file
-    );
-
-
-    try {
-
-      const response =
-        await fetch(
-          API.upload,
-          {
-            method: "POST",
-            body: formData,
-            credentials:
-              "same-origin"
-          }
-        );
-
-
-      if (
-        handleUnauthorized(response)
-      ) {
         return;
       }
 
+      // ------------------------------------------------------------
+      // Client-side size check
+      // Backend still performs the real security validation.
+      // This value matches the current config default of 20 MB.
+      // ------------------------------------------------------------
 
-      const data =
-        await response.json();
+      const maxPdfSize =
+        20 * 1024 * 1024;
 
+      if (file.size > maxPdfSize) {
+        el.uploadStatus.textContent =
+          "✗ PDF exceeds the current 20 MB upload limit.";
 
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-          data.detail ||
-          "Upload failed."
-        );
+        el.uploadStatus.className =
+          "upload-status error";
+
+        el.fileInput.value = "";
+
+        return;
       }
 
-
       el.uploadStatus.textContent =
-        `✓ ${data.document.document_name} indexed (${data.document.num_chunks} chunks)`;
-
+        `Uploading "${file.name}"...`;
 
       el.uploadStatus.className =
-        "upload-status success";
+        "upload-status";
 
+      const formData =
+        new FormData();
 
-      await loadDocuments();
+      formData.append(
+        "file",
+        file
+      );
 
+      try {
+        const response =
+          await fetch(
+            API.upload,
+            {
+              method: "POST",
+              body: formData,
+              credentials:
+                "same-origin",
+            }
+          );
 
-    } catch (err) {
+        if (
+          handleUnauthorized(response)
+        ) {
+          return;
+        }
 
-      el.uploadStatus.textContent =
-        `✗ ${err.message}`;
+        const data =
+          await safeJson(response);
 
-      el.uploadStatus.className =
-        "upload-status error";
+        if (!response.ok) {
+          throw new Error(
+            data.error ||
+              data.detail ||
+              "Upload failed."
+          );
+        }
 
+        const documentInfo =
+          data.document || {};
 
-    } finally {
+        el.uploadStatus.textContent =
+          `✓ ${
+            documentInfo.document_name ||
+            file.name
+          } indexed (${
+            documentInfo.num_chunks ??
+            0
+          } chunks)`;
 
-      el.fileInput.value = "";
+        el.uploadStatus.className =
+          "upload-status success";
+
+        await loadDocuments();
+      } catch (err) {
+        el.uploadStatus.textContent =
+          `✗ ${err.message}`;
+
+        el.uploadStatus.className =
+          "upload-status error";
+      } finally {
+        // Reset input so the same PDF can be selected again
+        // if needed.
+        el.fileInput.value = "";
+      }
     }
-  }
-);
-
+  );
+}
 
 async function loadDocuments() {
-
   try {
-
     const response =
       await fetch(
         API.documents,
         {
           credentials:
-            "same-origin"
+            "same-origin",
         }
       );
 
-
-    if (
-      handleUnauthorized(response)
-    ) {
+    if (handleUnauthorized(response)) {
       return;
     }
 
-
     const documents =
-      await response.json();
-
+      await safeJson(response);
 
     state.documents =
-      documents;
-
+      Array.isArray(documents)
+        ? documents
+        : [];
 
     renderDocumentList();
-
-
   } catch (err) {
-
     console.error(
       "Failed to load documents",
       err
@@ -1293,161 +1364,147 @@ async function loadDocuments() {
   }
 }
 
-
 function renderDocumentList() {
-
   if (
+    !state.documents ||
     state.documents.length === 0
   ) {
-
     el.documentList.innerHTML =
       `<p class="empty-hint">No documents uploaded yet.</p>`;
 
     return;
   }
 
-
   el.documentList.innerHTML = "";
-
 
   state.documents.forEach(
     (doc) => {
-
       const item =
-        document.createElement(
-          "div"
-        );
-
+        document.createElement("div");
 
       item.className =
         "document-item";
 
-
       const sizeKb =
         Math.round(
-          doc.size_bytes / 1024
+          (doc.size_bytes || 0) /
+            1024
         );
 
+      const info =
+        document.createElement("div");
 
-      item.innerHTML = `
-        <div class="doc-info">
+      info.className =
+        "doc-info";
 
-          <div
-            class="doc-name"
-            title="${escapeHtml(
-              doc.document_name
-            )}"
-          >
-            ${escapeHtml(
-              doc.document_name
-            )}
-          </div>
+      const name =
+        document.createElement("div");
 
-          <div class="doc-meta">
-            ${doc.num_chunks} chunks · ${sizeKb} KB
-          </div>
+      name.className =
+        "doc-name";
 
-        </div>
+      name.title =
+        doc.document_name || "";
 
-        <button
-          class="delete-btn"
-          data-id="${doc.document_id}"
-          title="Delete document"
-        >
-          🗑️
-        </button>
-      `;
+      name.textContent =
+        doc.document_name ||
+        "Unnamed document";
 
+      const meta =
+        document.createElement("div");
 
-      el.documentList.appendChild(
-        item
+      meta.className =
+        "doc-meta";
+
+      meta.textContent =
+        `${doc.num_chunks || 0} chunks · ${sizeKb} KB`;
+
+      info.appendChild(name);
+      info.appendChild(meta);
+
+      const deleteButton =
+        document.createElement("button");
+
+      deleteButton.className =
+        "delete-btn";
+
+      deleteButton.dataset.id =
+        doc.document_id;
+
+      deleteButton.title =
+        "Delete document";
+
+      deleteButton.textContent =
+        "🗑️";
+
+      item.appendChild(info);
+      item.appendChild(deleteButton);
+
+      deleteButton.addEventListener(
+        "click",
+        () =>
+          deleteDocument(
+            doc.document_id
+          )
       );
+
+      el.documentList.appendChild(item);
     }
   );
-
-
-  el.documentList
-    .querySelectorAll(
-      ".delete-btn"
-    )
-    .forEach(
-      (btn) => {
-
-        btn.addEventListener(
-          "click",
-          () =>
-            deleteDocument(
-              btn.dataset.id
-            )
-        );
-
-      }
-    );
 }
-
 
 async function deleteDocument(
   documentId
 ) {
-
   try {
-
     const response =
       await fetch(
-        `${API.documents}/${documentId}`,
+        `${API.documents}/${encodeURIComponent(
+          documentId
+        )}`,
         {
           method: "DELETE",
           credentials:
-            "same-origin"
+            "same-origin",
         }
       );
 
-
-    if (
-      handleUnauthorized(response)
-    ) {
+    if (handleUnauthorized(response)) {
       return;
     }
 
-
     const data =
-      await response.json();
-
+      await safeJson(response);
 
     if (!response.ok) {
       throw new Error(
         data.error ||
-        data.detail ||
-        "Failed to delete document."
+          data.detail ||
+          "Failed to delete document."
       );
     }
 
-
     await loadDocuments();
-
-
   } catch (err) {
-
     alert(
       `Could not delete document: ${err.message}`
     );
   }
 }
 
-
-// ---------------------------- Health check ----------------------------
+// ----------------------------------------------------------------------
+// Health check
+// ----------------------------------------------------------------------
 
 async function checkHealth() {
+  if (!el.healthIndicator) return;
 
   try {
-
     const response =
       await fetch(API.health);
 
-
     const data =
-      await response.json();
-
+      await safeJson(response);
 
     el.healthIndicator.classList.remove(
       "ok",
@@ -1455,33 +1512,32 @@ async function checkHealth() {
       "error"
     );
 
-
     if (
+      response.ok &&
       data.status === "ok"
     ) {
-
       el.healthIndicator.classList.add(
         "ok"
       );
 
       el.healthIndicator.title =
         "All systems operational";
-
-
     } else {
-
       el.healthIndicator.classList.add(
         "degraded"
       );
 
       el.healthIndicator.title =
-        (data.warnings || [])
-          .join(" | ") ||
+        (data.warnings || []).join(
+          " | "
+        ) ||
         "Degraded";
     }
-
-
   } catch (err) {
+    el.healthIndicator.classList.remove(
+      "ok",
+      "degraded"
+    );
 
     el.healthIndicator.classList.add(
       "error"
@@ -1492,13 +1548,40 @@ async function checkHealth() {
   }
 }
 
+// ----------------------------------------------------------------------
+// Mobile PDF picker support
+// ----------------------------------------------------------------------
 
-// ---------------------------- Init ----------------------------
+// Some mobile browsers behave better when the file input is triggered
+// from a direct user interaction. The label in index.html already
+// provides that interaction. This listener also supports direct clicks
+// on the upload button if the browser requires it.
+
+const uploadButton =
+  document.querySelector(
+    'label[for="file-input"]'
+  );
+
+if (
+  uploadButton &&
+  el.fileInput
+) {
+  uploadButton.addEventListener(
+    "click",
+    () => {
+      // The label normally opens the native picker automatically.
+      // Do not call click() here because that can cause duplicate
+      // picker dialogs on some browsers.
+    }
+  );
+}
+
+// ----------------------------------------------------------------------
+// Initialisation
+// ----------------------------------------------------------------------
 
 loadDocuments();
-
 loadChatHistory();
-
 checkHealth();
 
 setInterval(
