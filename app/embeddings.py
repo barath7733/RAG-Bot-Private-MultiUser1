@@ -1,151 +1,182 @@
 """
-Lightweight Gemini API based embeddings.
+Local sentence-transformers based embeddings.
 
-Uses Gemini Embedding API instead of local sentence-transformers,
-so the application does not load PyTorch/transformer models.
+Uses all-MiniLM-L6-v2 locally instead of the Gemini Embedding API.
+
+Embedding dimension:
+    384
+
+This is compatible with a Pinecone index configured with dimension=384.
 """
 
 from __future__ import annotations
 
 import logging
-import os
-import time
+from functools import lru_cache
 
-from google import genai
-from google.genai import types
+from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger("rag_chatbot.embeddings")
 
-EMBEDDING_MODEL = "gemini-embedding-001"
 
-# Keep 384 dimensions so the existing Pinecone index remains compatible.
+# ---------------------------------------------------------
+# Embedding configuration
+# ---------------------------------------------------------
+
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+# all-MiniLM-L6-v2 produces 384-dimensional vectors.
 EMBEDDING_DIMENSION = 384
 
-# Gemini allows at most 100 requests in one batch.
-# Use 80 to stay safely below the limit.
-EMBEDDING_BATCH_SIZE = 80
 
-_client: genai.Client | None = None
+# ---------------------------------------------------------
+# Load model only once
+# ---------------------------------------------------------
+
+@lru_cache(maxsize=1)
+def _get_model() -> SentenceTransformer:
+    """
+    Load the sentence-transformers model once and reuse it.
+
+    The model is downloaded automatically the first time the
+    application starts if it is not already available.
+    """
+
+    logger.info(
+        "Loading embedding model: %s",
+        EMBEDDING_MODEL,
+    )
+
+    model = SentenceTransformer(EMBEDDING_MODEL)
+
+    logger.info(
+        "Embedding model loaded successfully: %s",
+        EMBEDDING_MODEL,
+    )
+
+    return model
 
 
-def _get_client() -> genai.Client:
-    global _client
-
-    if _client is None:
-        api_key = os.getenv("GEMINI_API_KEY")
-
-        if not api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY environment variable is not configured."
-            )
-
-        _client = genai.Client(api_key=api_key)
-
-    return _client
-
+# ---------------------------------------------------------
+# Dimension
+# ---------------------------------------------------------
 
 def get_embedding_dimension() -> int:
-    """Return the embedding vector dimension."""
+    """
+    Return the embedding vector dimension.
+    """
+
     return EMBEDDING_DIMENSION
 
 
-def _embed_batch(
-    client: genai.Client,
+# ---------------------------------------------------------
+# Document embeddings
+# ---------------------------------------------------------
+
+def embed_texts(
     texts: list[str],
 ) -> list[list[float]]:
-    """Generate embeddings for one safe-sized batch."""
-
-    result = client.models.embed_content(
-        model=EMBEDDING_MODEL,
-        contents=texts,
-        config=types.EmbedContentConfig(
-            output_dimensionality=EMBEDDING_DIMENSION,
-            task_type="RETRIEVAL_DOCUMENT",
-        ),
-    )
-
-    if not result.embeddings:
-        raise RuntimeError("Gemini returned no embeddings.")
-
-    return [embedding.values for embedding in result.embeddings]
-
-
-def embed_texts(texts: list[str]) -> list[list[float]]:
     """
     Generate embeddings for multiple document chunks.
 
-    Large lists are automatically split into smaller batches so that
-    Gemini never receives more than EMBEDDING_BATCH_SIZE requests
-    in a single API call.
+    Uses local sentence-transformers instead of an external
+    Gemini embedding API.
+
+    Parameters
+    ----------
+    texts:
+        List of document chunks.
+
+    Returns
+    -------
+    list[list[float]]
+        One 384-dimensional embedding vector per text.
     """
 
     if not texts:
         return []
 
-    client = _get_client()
-
-    all_embeddings: list[list[float]] = []
-
-    total = len(texts)
+    model = _get_model()
 
     logger.info(
-        "Generating embeddings for %d chunks using batch size %d.",
-        total,
-        EMBEDDING_BATCH_SIZE,
+        "Generating embeddings for %d document chunks using %s",
+        len(texts),
+        EMBEDDING_MODEL,
     )
 
-    for start in range(0, total, EMBEDDING_BATCH_SIZE):
-        end = min(start + EMBEDDING_BATCH_SIZE, total)
+    # Normalize embeddings so cosine similarity works consistently.
+    embeddings = model.encode(
+        texts,
+        batch_size=32,
+        show_progress_bar=False,
+        normalize_embeddings=True,
+        convert_to_numpy=True,
+    )
 
-        batch = texts[start:end]
+    result = embeddings.tolist()
 
-        logger.info(
-            "Embedding batch: chunks %d-%d of %d",
-            start + 1,
-            end,
-            total,
+    # Safety check
+    if len(result) != len(texts):
+        raise RuntimeError(
+            f"Embedding count mismatch: "
+            f"generated {len(result)} embeddings "
+            f"for {len(texts)} texts."
         )
 
-        embeddings = _embed_batch(client, batch)
-
-        if len(embeddings) != len(batch):
+    for index, embedding in enumerate(result):
+        if len(embedding) != EMBEDDING_DIMENSION:
             raise RuntimeError(
-                f"Gemini returned {len(embeddings)} embeddings "
-                f"for {len(batch)} texts."
+                f"Invalid embedding dimension at index {index}: "
+                f"expected {EMBEDDING_DIMENSION}, "
+                f"got {len(embedding)}."
             )
-
-        all_embeddings.extend(embeddings)
-
-        # Small pause between batches to reduce the chance of rate limits.
-        if end < total:
-            time.sleep(0.2)
 
     logger.info(
         "Successfully generated %d embeddings.",
-        len(all_embeddings),
+        len(result),
     )
 
-    return all_embeddings
+    return result
 
 
-def embed_query(text: str) -> list[float]:
-    """Generate an embedding for a user query."""
+# ---------------------------------------------------------
+# Query embedding
+# ---------------------------------------------------------
 
-    if not text.strip():
+def embed_query(
+    text: str,
+) -> list[float]:
+    """
+    Generate an embedding for a user search query.
+
+    Uses the same local model as document embeddings so that
+    document vectors and query vectors are compatible.
+    """
+
+    if not text or not text.strip():
         return []
 
-    client = _get_client()
+    model = _get_model()
 
-    result = client.models.embed_content(
-        model=EMBEDDING_MODEL,
-        contents=text,
-        config=types.EmbedContentConfig(
-            output_dimensionality=EMBEDDING_DIMENSION,
-            task_type="RETRIEVAL_QUERY",
-        ),
+    logger.info(
+        "Generating query embedding using %s",
+        EMBEDDING_MODEL,
     )
 
-    if not result.embeddings:
-        raise RuntimeError("Gemini returned no embedding.")
+    embedding = model.encode(
+        text.strip(),
+        show_progress_bar=False,
+        normalize_embeddings=True,
+        convert_to_numpy=True,
+    )
 
-    return result.embeddings[0].values
+    result = embedding.tolist()
+
+    if len(result) != EMBEDDING_DIMENSION:
+        raise RuntimeError(
+            f"Invalid query embedding dimension: "
+            f"expected {EMBEDDING_DIMENSION}, "
+            f"got {len(result)}."
+        )
+
+    return result
