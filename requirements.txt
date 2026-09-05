@@ -18,5 +18,3 @@ google-genai
 sqlalchemy==2.0.36
 bcrypt==4.2.1
 pyjwt==2.10.1
-sentence-transformers
-torch
